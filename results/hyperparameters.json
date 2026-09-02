@@ -1,0 +1,13 @@
+{
+ "batch_size": 32,
+ "lr": 0.0001,
+ "optimizer": "Adam",
+ "epochs": 10,
+ "init": "ImageNet1K_V1",
+ "input": "224x224 resize (anisotropic, consistent with the original)",
+ "augmentation": "RandomHorizontalFlip + RandomVerticalFlip",
+ "n_folds": 5,
+ "cross_instar_reps": 3,
+ "base_seed": 42,
+ "mixed_mtl_reg_weight": 0.1
+}

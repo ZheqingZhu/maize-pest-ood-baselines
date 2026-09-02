@@ -7,23 +7,23 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 导入 DataLoader
+# Import DataLoader
 from dataset import get_baseline_dataloaders, SPECIES_MAP
 
 
-# ================= 1. 混合多任务 ResNet 模型 =================
+# ================= 1. Mixed multi-task ResNet model =================
 class MixedMTLResNet(nn.Module):
     def __init__(self, num_species=4):
         super(MixedMTLResNet, self).__init__()
-        # 加载预训练主干
+        # Load the pretrained backbone
         shared_resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
         self.features = nn.Sequential(*list(shared_resnet.children())[:-1])
         num_ftrs = shared_resnet.fc.in_features
 
-        # 头 A：物种分类头 (输出 4 个类别的 Logits)
+        # Head A: species classification head (outputs logits for 4 classes)
         self.fc_species = nn.Linear(num_ftrs, num_species)
 
-        # 头 B：日龄回归头 (输出 1 个连续的浮点数)
+        # Head B: chronological age regression head (outputs 1 continuous float)
         self.fc_days = nn.Linear(num_ftrs, 1)
 
     def forward(self, x):
@@ -35,16 +35,16 @@ class MixedMTLResNet(nn.Module):
         return out_species, out_days
 
 
-# ================= 2. 训练与验证循环 =================
+# ================= 2. Training and validation loop =================
 def train_mixed_mtl(model, dataloaders, optimizer, device, num_epochs=15, output_dir='results'):
     os.makedirs(output_dir, exist_ok=True)
     save_path = os.path.join(output_dir, 'best_mixed_mtl_model.pth')
 
-    # 定义两种不同的损失函数
+    # Define two different loss functions
     criterion_species = nn.CrossEntropyLoss()
     criterion_days = nn.MSELoss()
 
-    # 权重平衡：因为 MSE Loss 的数值通常比 CrossEntropy 大很多，这里给回归 Loss 加一个缩放系数
+    # Weight balancing: MSE loss is usually much larger than CrossEntropy, so scale the regression loss down
     weight_regression = 0.1
 
     best_loss = float('inf')
@@ -65,7 +65,7 @@ def train_mixed_mtl(model, dataloaders, optimizer, device, num_epochs=15, output
             for batch in dataloaders[phase]:
                 inputs = batch['image'].to(device)
 
-                # 获取双标签：物种 (LongTensor) 和 天数 (FloatTensor)
+                # Get both labels: species (LongTensor) and days (FloatTensor)
                 labels_species = batch['label'].to(device)
                 labels_days = batch['days'].float().unsqueeze(1).to(device)
 
@@ -76,11 +76,11 @@ def train_mixed_mtl(model, dataloaders, optimizer, device, num_epochs=15, output
 
                     _, preds_species = torch.max(out_species, 1)
 
-                    # 计算双重损失
+                    # Compute the dual loss
                     loss_class = criterion_species(out_species, labels_species)
                     loss_reg = criterion_days(out_days, labels_days)
 
-                    # 混合总损失
+                    # Combined total loss
                     total_loss = loss_class + weight_regression * loss_reg
 
                     if phase == 'train':
@@ -95,19 +95,19 @@ def train_mixed_mtl(model, dataloaders, optimizer, device, num_epochs=15, output
 
             print(f'{phase.capitalize()} Total Loss: {epoch_loss:.4f} | Species Acc: {acc_species:.4f}')
 
-            # 保存验证集 Total Loss 最低的权重
+            # Save the weights with the lowest val Total Loss
             if phase == 'val' and epoch_loss < best_loss:
                 best_loss = epoch_loss
                 torch.save(model.state_dict(), save_path)
-                print(f"🌟 发现更低的总损失，混合 MTL 模型已保存！")
+                print(f"🌟 Lower total loss found, mixed MTL model saved!")
 
-    print(f'\n混合 MTL 训练完成！')
+    print(f'\nMixed MTL training complete!')
     return model
 
 
-# ================= 3. 测试与评估 =================
+# ================= 3. Testing and evaluation =================
 def evaluate_mixed_mtl(model, test_loader, device, output_dir='results'):
-    print("\n--- 正在测试集上评估混合 MTL 模型 ---")
+    print("\n--- Evaluating mixed MTL model on the test set ---")
     model.eval()
 
     all_preds_species, all_labels_species = [], []
@@ -130,13 +130,13 @@ def evaluate_mixed_mtl(model, test_loader, device, output_dir='results'):
             all_preds_days.extend(preds_days)
             all_labels_days.extend(labels_days)
 
-    # 1. 物种分类报告
+    # 1. Species classification report
     species_names = [k for k, v in sorted(SPECIES_MAP.items(), key=lambda item: item[1])]
-    print("\n[任务A: 物种分类报告 - Species Classification]")
+    print("\n[Task A: Species Classification Report]")
     report_species = classification_report(all_labels_species, all_preds_species, target_names=species_names, digits=4)
     print(report_species)
 
-    # 2. 日龄回归报告
+    # 2. Chronological age regression report
     all_preds_days = np.array(all_preds_days)
     all_labels_days = np.array(all_labels_days)
 
@@ -144,18 +144,18 @@ def evaluate_mixed_mtl(model, test_loader, device, output_dir='results'):
     rmse = np.sqrt(mean_squared_error(all_labels_days, all_preds_days))
     r2 = r2_score(all_labels_days, all_preds_days)
 
-    print("\n[任务B: 连续日龄回归预测 - Chronological Age Regression]")
-    print(f"Mean Absolute Error (MAE): {mae:.4f} 天")
-    print(f"Root Mean Squared Error (RMSE): {rmse:.4f} 天")
+    print("\n[Task B: Continuous Chronological Age Regression]")
+    print(f"Mean Absolute Error (MAE): {mae:.4f} days")
+    print(f"Root Mean Squared Error (RMSE): {rmse:.4f} days")
     print(f"R-squared (R2 Score): {r2:.4f}")
 
-    # 保存报告
+    # Save the report
     with open(os.path.join(output_dir, 'mixed_mtl_report.txt'), 'w', encoding='utf-8') as f:
         f.write("=== Task A: Species Classification ===\n" + report_species + "\n\n")
         f.write("=== Task B: Age Regression ===\n")
         f.write(f"MAE: {mae:.4f} Days\nRMSE: {rmse:.4f} Days\nR2: {r2:.4f}")
 
-    print(f"✅ 混合 MTL 综合报告已保存至 {os.path.join(output_dir, 'mixed_mtl_report.txt')}")
+    print(f"✅ Mixed MTL combined report saved to {os.path.join(output_dir, 'mixed_mtl_report.txt')}")
 
 
 if __name__ == '__main__':
@@ -164,15 +164,15 @@ if __name__ == '__main__':
     OUTPUT_DIR = 'results'
     DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    print("\n加载数据集 (混合 MTL)...")
+    print("\nLoading dataset (mixed MTL)...")
     dataloaders = get_baseline_dataloaders(CSV_FILE, DATA_DIR, batch_size=32, num_workers=0)
 
     model = MixedMTLResNet(num_species=4).to(DEVICE)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-    # 训练 10 个 epoch
+    # Train for 10 epochs
     model = train_mixed_mtl(model, dataloaders, optimizer, DEVICE, num_epochs=10, output_dir=OUTPUT_DIR)
 
-    # 评估
+    # Evaluate
     model.load_state_dict(torch.load(os.path.join(OUTPUT_DIR, 'best_mixed_mtl_model.pth')))
     evaluate_mixed_mtl(model, dataloaders['test'], DEVICE, output_dir=OUTPUT_DIR)

@@ -8,20 +8,20 @@ import seaborn as sns
 import numpy as np
 import os
 
-# 导入跨龄期专用的 DataLoader
+# Import the cross-instar specific DataLoader
 from dataset import get_cross_instar_dataloaders, SPECIES_MAP
 
 
 def train_cross_instar_model(model, dataloaders, criterion, optimizer, device, num_epochs=15, output_dir='results'):
     """
-    模型训练与验证循环 (仅在 Source Domain: 1-3龄 上进行)
+    Model training and validation loop (only on Source Domain: instars 1-3)
     """
     os.makedirs(output_dir, exist_ok=True)
     save_path = os.path.join(output_dir, 'best_cross_instar_model.pth')
 
     best_acc = 0.0
 
-    print("\n[开始在源域 (Source Domain: 1-3龄) 上训练模型...]")
+    print("\n[Start training the model on the source domain (Source Domain: instars 1-3)...]")
     for epoch in range(num_epochs):
         print(f'\nEpoch {epoch + 1}/{num_epochs}')
         print('-' * 10)
@@ -58,22 +58,22 @@ def train_cross_instar_model(model, dataloaders, criterion, optimizer, device, n
 
             print(f'{phase.capitalize()} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
-            # 保存源域验证集上表现最好的模型
+            # Save the model that performs best on the source-domain val set
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 torch.save(model.state_dict(), save_path)
-                print(f"🌟 发现更好的模型，已保存至 {save_path}")
+                print(f"🌟 Found a better model, saved to {save_path}")
 
-    print(f'\n源域训练完成！最高源域验证集准确率: {best_acc:.4f}')
+    print(f'\nSource-domain training complete! Best source-domain val accuracy: {best_acc:.4f}')
     return model
 
 
 def evaluate_cross_instar_model(model, test_loader, device, class_names, output_dir='results'):
     """
-    在目标域 (Target Domain: 4-6龄) 上进行灾难性测试
+    Catastrophic test on the target domain (Target Domain: instars 4-6)
     """
     print("\n======================================================")
-    print("🚀 正在未知目标域 (Target Domain: 4-6龄) 上进行泛化测试...")
+    print("🚀 Running generalization test on the unseen target domain (Target Domain: instars 4-6)...")
     print("======================================================")
 
     model.eval()
@@ -91,8 +91,8 @@ def evaluate_cross_instar_model(model, test_loader, device, class_names, output_
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
-    # 1. 打印并保存分类报告
-    print("\n[跨龄期泛化分类报告 - Cross-Instar Classification Report]")
+    # 1. Print and save the classification report
+    print("\n[Cross-Instar Generalization Classification Report]")
     report = classification_report(all_labels, all_preds, target_names=class_names, digits=4)
     print(report)
 
@@ -102,24 +102,24 @@ def evaluate_cross_instar_model(model, test_loader, device, class_names, output_
         f.write("Target Testing: Instar 4-6\n\n")
         f.write(report)
 
-    # 2. 绘制并保存混淆矩阵
+    # 2. Plot and save the confusion matrix
     cm = confusion_matrix(all_labels, all_preds)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Reds', xticklabels=class_names,
-                yticklabels=class_names)  # 换成红色系，体现"灾难性挑战"
-    plt.ylabel('True Label (实际晚期物种)')
-    plt.xlabel('Predicted Label (源自早期特征的预测)')
+                yticklabels=class_names)  # use a red palette to reflect the "catastrophic challenge"
+    plt.ylabel('True Label (actual late-instar species)')
+    plt.xlabel('Predicted Label (predicted from early-instar features)')
     plt.title('Cross-Instar Distribution Shift: Testing on Instars 4-6')
     plt.tight_layout()
 
     cm_path = os.path.join(output_dir, 'cross_instar_confusion_matrix.png')
     plt.savefig(cm_path, dpi=300)
-    print(f"✅ 跨龄期混淆矩阵已保存至 '{cm_path}'")
-    print(f"✅ 跨龄期文本报告已保存至 '{os.path.join(output_dir, 'cross_instar_report.txt')}'")
+    print(f"✅ Cross-instar confusion matrix saved to '{cm_path}'")
+    print(f"✅ Cross-instar text report saved to '{os.path.join(output_dir, 'cross_instar_report.txt')}'")
 
 
 if __name__ == '__main__':
-    # 配置
+    # Configuration
     CSV_FILE = 'metadata.csv'
     DATA_DIR = 'data'
     OUTPUT_DIR = 'results'
@@ -127,12 +127,12 @@ if __name__ == '__main__':
 
     class_names = [k for k, v in sorted(SPECIES_MAP.items(), key=lambda item: item[1])]
 
-    # 1. 加载跨龄期分布偏移的 DataLoader
-    # 训练集和验证集只有 1-3 龄，测试集全是 4-6 龄
-    print("\n加载数据集 (Cross-Instar Distribution Shift)...")
+    # 1. Load the cross-instar distribution shift DataLoader
+    # train and val sets only have instars 1-3, the test set is all instars 4-6
+    print("\nLoading dataset (Cross-Instar Distribution Shift)...")
     dataloaders = get_cross_instar_dataloaders(CSV_FILE, DATA_DIR, batch_size=32, num_workers=0)
 
-    # 2. 初始化分类模型 (预测物种 4 分类)
+    # 2. Initialize the classification model (4-class species prediction)
     model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 4)
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-    # 3. 训练 (仅在1-3龄)
+    # 3. Train (only on instars 1-3)
     model = train_cross_instar_model(
         model,
         dataloaders,
@@ -152,7 +152,7 @@ if __name__ == '__main__':
         output_dir=OUTPUT_DIR
     )
 
-    # 4. 评估 (直接冲击4-6龄)
+    # 4. Evaluate (directly on instars 4-6)
     best_model_path = os.path.join(OUTPUT_DIR, 'best_cross_instar_model.pth')
     model.load_state_dict(torch.load(best_model_path))
 

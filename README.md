@@ -1,39 +1,48 @@
 # Maize Leaf Herbivory Dataset: PyTorch Baselines
 
-PyTorch code for the paper: **A Spatio-temporal Image Dataset of Maize Leaf Herbivory by Four Major Pests** (*Scientific Data*).
+PyTorch code for the paper: *A Spatio-temporal Image Dataset of Maize Leaf Herbivory by Four Major Pests* (Scientific Data, revised).
+
+**What's new in the revision**: corrected, head-capsule-validated day-to-instar mapping; leaf-level provenance (`leaf_id`) for every image; and biologically **grouped evaluation protocols** (5-fold GroupKFold by leaf, plus leaf-disjoint cross-instar splits) replacing the original random-split benchmarks.
 
 ## 1. Data Preparation
 
-The image data and metadata are hosted on Zenodo. You must download them before running the scripts.
+The image data and metadata are hosted on Zenodo (v2): DOI `10.5281/zenodo.20327492`.
 
-1. Download `Maize_Leaf_Herbivory_Dataset.zip` from Zenodo: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20327492.svg)](https://doi.org/10.5281/zenodo.20327492)
-2. Extract the archive.
-3. Move the `data/` directory and `metadata.csv` into the root folder of this repository.
-
-The repository structure should be:
-```text
-.
-├── data/                  # From Zenodo
-├── metadata.csv           # From Zenodo
-├── dataset.py
-├── train.py
-├── train_cross_instar.py
-├── train_mtl.py
-├── train_mtl_mixed.py
-└── README.md
-```
+1. Download and extract `Maize_Leaf_Herbivory_Dataset.zip` from Zenodo.
+2. Place the extracted `data/` directory in the root of this repository. The layout is `data/<species>/<instar>/<day>/*.jpg`.
+3. `metadata.csv` (included here; identical to the Zenodo version) provides `image_path, species, instar, days_post_hatching, leaf_id` for the 14,642 images.
+4. **Optional** (needed only to reproduce the grouped benchmarks exactly): also download `supplementary_provenance_labeled_images.zip` from the same Zenodo record and extract its contents into `data/supplementary/`. `grouped_manifest.csv` (included) covers the resulting 14,579-image provenance-resolved evaluation set.
 
 ## 2. Dependencies
 
-```bash
-pip install torch torchvision scikit-learn matplotlib seaborn pandas numpy
+```
+pip install torch torchvision scikit-learn matplotlib seaborn pandas numpy scipy opencv-python pytorch-grad-cam
 ```
 
 ## 3. Scripts
 
-Run the scripts directly from the root directory. Evaluation metrics and confusion matrices will be saved to the `results/` folder.
+Run from the repository root.
 
-* **`train.py`**: Standard 4-class species classification.
-* **`train_mtl.py`**: Multi-task learning (species classification + discrete instar classification).
-* **`train_mtl_mixed.py`**: Mixed multi-task learning (species classification + continuous age regression).
-* **`train_cross_instar.py`**: Out-of-distribution (OOD) evaluation. Trains on instars 1-3, tests on unseen instars 4-6.
+### Grouped evaluation (revised benchmarks, used in the revised paper)
+
+- `train_grouped.py baseline|mtl|mixed_mtl|cross_instar|all --epochs 10` — leaf-grouped 5-fold cross-validation (or 3 leaf-disjoint repetitions for cross-instar), reporting mean ± SD and 95% CI. Requires `grouped_manifest.csv` and the Zenodo `data/` tree.
+
+### Original random-split baselines (superseded; kept for reference)
+
+- `train.py` — standard 4-class species classification (random split).
+- `train_mtl.py` — multi-task learning (species + discrete instar).
+- `train_mtl_mixed.py` — mixed multi-task learning (species + continuous age regression).
+- `train_cross_instar.py` — developmental distribution-shift evaluation (trains on instars 1–3, tests on unseen instars 4–6).
+
+### Visualization
+
+- `plot_tsne.py` — t-SNE projection of penultimate-layer embeddings (early vs. late instars per species).
+- `plot_figure6_cam.py` — Grad-CAM attention heatmaps for representative crops of the four species (requires `pytorch-grad-cam`).
+
+## 4. Results
+
+`results/` contains the grouped-evaluation summaries (`*_summary.csv`), the full training configuration (`hyperparameters.json`), and the figure comparing random-split vs. leaf-grouped evaluation.
+
+## License
+
+MIT (code). The dataset is distributed via Zenodo under its own terms.

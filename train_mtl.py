@@ -6,24 +6,24 @@ from sklearn.metrics import classification_report
 import os
 import numpy as np
 
-# 导入 DataLoader
+# Import DataLoader
 from dataset import get_baseline_dataloaders, SPECIES_MAP
 
 
-# ================= 1. 定义多任务 ResNet 模型 =================
+# ================= 1. Define the multi-task ResNet model =================
 class MultiTaskResNet(nn.Module):
     def __init__(self, num_species=4, num_instars=6):
         super(MultiTaskResNet, self).__init__()
-        # 加载预训练的 ResNet50
+        # Load pretrained ResNet50
         shared_resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
 
-        # 提取全连接层之前的特征提取部分
+        # Take the feature extractor part before the fully-connected layer
         self.features = nn.Sequential(*list(shared_resnet.children())[:-1])
         num_ftrs = shared_resnet.fc.in_features
 
-        # 定义两个独立的分类头
-        self.fc_species = nn.Linear(num_ftrs, num_species)  # 物种分类头 (4类)
-        self.fc_instar = nn.Linear(num_ftrs, num_instars)  # 龄期分类头 (6类)
+        # Define two independent classification heads
+        self.fc_species = nn.Linear(num_ftrs, num_species)  # species classification head (4 classes)
+        self.fc_instar = nn.Linear(num_ftrs, num_instars)  # instar classification head (6 classes)
 
     def forward(self, x):
         x = self.features(x)
@@ -34,7 +34,7 @@ class MultiTaskResNet(nn.Module):
         return out_species, out_instar
 
 
-# ================= 2. 训练与验证循环 =================
+# ================= 2. Training and validation loop =================
 def train_mtl_model(model, dataloaders, criterion, optimizer, device, num_epochs=15, output_dir='results'):
     os.makedirs(output_dir, exist_ok=True)
     save_path = os.path.join(output_dir, 'best_mtl_model.pth')
@@ -58,9 +58,9 @@ def train_mtl_model(model, dataloaders, criterion, optimizer, device, num_epochs
             for batch in dataloaders[phase]:
                 inputs = batch['image'].to(device)
 
-                # 获取双标签
+                # Get both labels
                 labels_species = batch['label'].to(device)
-                # 注意：数据集中龄期是 1-6，PyTorch 类别索引必须是 0-5，所以要减 1
+                # NOTE: instars in the dataset are 1-6, PyTorch class indices must be 0-5, so subtract 1
                 labels_instar = (batch['instar'].clone().detach() - 1).to(device)
 
                 optimizer.zero_grad()
@@ -71,7 +71,7 @@ def train_mtl_model(model, dataloaders, criterion, optimizer, device, num_epochs
                     _, preds_species = torch.max(out_species, 1)
                     _, preds_instar = torch.max(out_instar, 1)
 
-                    # 计算双重损失 (1:1 的权重)
+                    # Compute the dual loss (1:1 weights)
                     loss_species = criterion(out_species, labels_species)
                     loss_instar = criterion(out_instar, labels_instar)
                     total_loss = loss_species + loss_instar
@@ -91,19 +91,19 @@ def train_mtl_model(model, dataloaders, criterion, optimizer, device, num_epochs
             print(
                 f'{phase.capitalize()} Total Loss: {epoch_loss:.4f} | Species Acc: {acc_species:.4f} | Instar Acc: {acc_instar:.4f}')
 
-            # 保存验证集 Total Loss 最低的权重
+            # Save the weights with the lowest val Total Loss
             if phase == 'val' and epoch_loss < best_loss:
                 best_loss = epoch_loss
                 torch.save(model.state_dict(), save_path)
-                print(f"🌟 发现更低的验证集损失，模型已保存！")
+                print(f"🌟 Lower val loss found, model saved!")
 
-    print(f'\nMTL 训练完成！')
+    print(f'\nMTL training complete!')
     return model
 
 
-# ================= 3. 测试与评估 =================
+# ================= 3. Testing and evaluation =================
 def evaluate_mtl_model(model, test_loader, device, output_dir='results'):
-    print("\n--- 正在测试集上评估 MTL 模型 ---")
+    print("\n--- Evaluating MTL model on the test set ---")
     model.eval()
 
     all_preds_species, all_labels_species = [], []
@@ -129,11 +129,11 @@ def evaluate_mtl_model(model, test_loader, device, output_dir='results'):
     species_names = [k for k, v in sorted(SPECIES_MAP.items(), key=lambda item: item[1])]
     instar_names = [f'Instar_{i}' for i in range(1, 7)]
 
-    print("\n[物种分类报告 - Species]")
+    print("\n[Species Classification Report]")
     report_species = classification_report(all_labels_species, all_preds_species, target_names=species_names, digits=4)
     print(report_species)
 
-    print("\n[龄期预测报告 - Instars]")
+    print("\n[Instar Prediction Report]")
     report_instar = classification_report(all_labels_instar, all_preds_instar, target_names=instar_names, digits=4)
     print(report_instar)
 
@@ -141,7 +141,7 @@ def evaluate_mtl_model(model, test_loader, device, output_dir='results'):
         f.write("=== Species Prediction ===\n" + report_species + "\n\n")
         f.write("=== Instar Prediction ===\n" + report_instar)
 
-    print(f"✅ MTL 综合报告已保存至 {os.path.join(output_dir, 'mtl_classification_report.txt')}")
+    print(f"✅ MTL combined report saved to {os.path.join(output_dir, 'mtl_classification_report.txt')}")
 
 
 if __name__ == '__main__':
@@ -150,16 +150,16 @@ if __name__ == '__main__':
     OUTPUT_DIR = 'results'
     DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    print("\n加载 MTL 数据集...")
+    print("\nLoading MTL dataset...")
     dataloaders = get_baseline_dataloaders(CSV_FILE, DATA_DIR, batch_size=32, num_workers=0)
 
     model = MultiTaskResNet(num_species=4, num_instars=6).to(DEVICE)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-    # 训练 10 个 epoch 足以看清趋势
+    # 10 epochs are enough to see the trend
     model = train_mtl_model(model, dataloaders, criterion, optimizer, DEVICE, num_epochs=10, output_dir=OUTPUT_DIR)
 
-    # 评估
+    # Evaluate
     model.load_state_dict(torch.load(os.path.join(OUTPUT_DIR, 'best_mtl_model.pth')))
     evaluate_mtl_model(model, dataloaders['test'], DEVICE, output_dir=OUTPUT_DIR)

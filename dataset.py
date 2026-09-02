@@ -6,25 +6,25 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from sklearn.model_selection import train_test_split
 
-# 定义物种到类别ID的映射
+# Mapping from species name to class ID
 SPECIES_MAP = {
-    'frugiperda': 0,  # 草地贪夜蛾
-    'litura': 1,  # 斜纹夜蛾
-    'separata': 2,  # 黏虫
-    'ypsilon': 3  # 小地老虎
+    'frugiperda': 0,  # Spodoptera frugiperda
+    'litura': 1,  # Spodoptera litura
+    'separata': 2,  # Mythimna separata
+    'ipsilon': 3  # Agrotis ipsilon (black cutworm)
 }
 
 
 class MaizeHerbivoryDataset(Dataset):
     """
-    玉米受食图像自定义数据集类
+    Custom dataset class for maize herbivory images
     """
 
     def __init__(self, dataframe, root_dir, transform=None):
         """
-        :param dataframe: 包含 image_path, species, instar, days 信息的 pandas DataFrame
-        :param root_dir: 图像所在的根目录 (例如 'data')
-        :param transform: 图像预处理/增强操作
+        :param dataframe: pandas DataFrame containing image_path, species, instar, days
+        :param root_dir: root directory of the images (e.g. 'data_real')
+        :param transform: image preprocessing/augmentation operations
         """
         self.dataframe = dataframe.reset_index(drop=True)
         self.root_dir = root_dir
@@ -34,28 +34,28 @@ class MaizeHerbivoryDataset(Dataset):
         return len(self.dataframe)
 
     def __getitem__(self, idx):
-        # 获取相对路径并拼接绝对路径
+        # Get the relative path and join it into an absolute path
         rel_path = self.dataframe.loc[idx, 'image_path']
         img_path = os.path.join(self.root_dir, rel_path)
 
-        # 读取图像 (转换为RGB，防止有灰度图或四通道图)
+        # Read the image (convert to RGB in case of grayscale or 4-channel images)
         image = Image.open(img_path).convert('RGB')
 
         if self.transform:
             image = self.transform(image)
 
-        # 获取物种标签
+        # Get the species label
         species_str = self.dataframe.loc[idx, 'species']
         label = SPECIES_MAP[species_str]
 
-        # 获取其他元数据（可选，在多任务学习或误差分析时非常有用）
+        # Get other metadata (optional, very useful for multi-task learning or error analysis)
         instar = self.dataframe.loc[idx, 'instar']
         days = self.dataframe.loc[idx, 'days_post_hatching']
 
-        # 将标签转为 tensor
+        # Convert the label to a tensor
         label = torch.tensor(label, dtype=torch.long)
 
-        # 返回字典格式，方便后续获取元数据进行 t-SNE 分析
+        # Return a dict so metadata can be retrieved later for t-SNE analysis
         return {
             'image': image,
             'label': label,
@@ -65,12 +65,12 @@ class MaizeHerbivoryDataset(Dataset):
         }
 
 
-# ================= 数据预处理定义 =================
-# 基于 ImageNet 预训练模型的标准预处理
+# ================= Data preprocessing definitions =================
+# Standard preprocessing for ImageNet pretrained models
 data_transforms = {
     'train': transforms.Compose([
         transforms.Resize((224, 224)),
-        # 在这里可以加入你想要的数据增强，如翻转、颜色微调等
+        # Additional augmentations (flips, color jitter, etc.) can be added here
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
         transforms.ToTensor(),
@@ -84,14 +84,14 @@ data_transforms = {
 }
 
 
-# ================= 划分策略 1: 基线随机划分 =================
+# ================= Split strategy 1: baseline random split =================
 def get_baseline_dataloaders(csv_path, root_dir, batch_size=32, num_workers=4):
-    """按照 70:10:20 的比例进行随机基础划分"""
+    """Basic random split with a 70:10:20 ratio"""
     df = pd.read_csv(csv_path)
 
-    # 第一次划分：70% 训练，30% (验证+测试)
+    # First split: 70% train, 30% (val+test)
     train_df, temp_df = train_test_split(df, test_size=0.3, stratify=df['species'], random_state=42)
-    # 第二次划分：验证和测试 1:2 (即总体 10% 和 20%)
+    # Second split: val and test 1:2 (i.e. 10% and 20% overall)
     val_df, test_df = train_test_split(temp_df, test_size=(2 / 3), stratify=temp_df['species'], random_state=42)
 
     print(f"[Baseline Split] Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
@@ -109,30 +109,30 @@ def get_baseline_dataloaders(csv_path, root_dir, batch_size=32, num_workers=4):
     return dataloaders
 
 
-# ================= 划分策略 2: 跨龄期分布偏移划分 =================
+# ================= Split strategy 2: cross-instar distribution shift split =================
 def get_cross_instar_dataloaders(csv_path, root_dir, batch_size=32, num_workers=4):
     """
-    分布偏移挑战：
-    Source Domain (训练+验证): 1-3 龄期
-    Target Domain (测试): 4-6 龄期
+    Distribution shift challenge:
+    Source Domain (train+val): instars 1-3
+    Target Domain (test): instars 4-6
     """
     df = pd.read_csv(csv_path)
 
-    # 根据龄期拆分源域和目标域
+    # Split into source and target domains by instar
     source_df = df[df['instar'].isin([1, 2, 3])]
     target_df = df[df['instar'].isin([4, 5, 6])]
 
-    # 源域内部再划分为训练集和验证集 (例如 80%训练, 20%验证)
+    # Split the source domain further into train and val sets (e.g. 80% train, 20% val)
     train_df, val_df = train_test_split(source_df, test_size=0.2, stratify=source_df['species'], random_state=42)
-    test_df = target_df  # 测试集完全由未见过的晚期阶段组成
+    test_df = target_df  # the test set consists entirely of unseen late instars
 
     print(
-        f"[Cross-Instar Split] Source Train(1-3龄): {len(train_df)}, Source Val(1-3龄): {len(val_df)}, Target Test(4-6龄): {len(test_df)}")
+        f"[Cross-Instar Split] Source Train(instar 1-3): {len(train_df)}, Source Val(instar 1-3): {len(val_df)}, Target Test(instar 4-6): {len(test_df)}")
 
     datasets = {
         'train': MaizeHerbivoryDataset(train_df, root_dir, transform=data_transforms['train']),
         'val': MaizeHerbivoryDataset(val_df, root_dir, transform=data_transforms['val_test']),
-        'test': MaizeHerbivoryDataset(test_df, root_dir, transform=data_transforms['val_test'])  # 重点：测试集用 target_df
+        'test': MaizeHerbivoryDataset(test_df, root_dir, transform=data_transforms['val_test'])  # NOTE: test set uses target_df
     }
 
     dataloaders = {
@@ -142,20 +142,20 @@ def get_cross_instar_dataloaders(csv_path, root_dir, batch_size=32, num_workers=
     return dataloaders
 
 
-# ================= 测试代码 =================
+# ================= Test code =================
 if __name__ == '__main__':
     CSV_FILE = 'metadata.csv'
-    DATA_DIR = 'data'  # 替换为你的实际图片根目录
+    DATA_DIR = 'data'  # replace with your actual image root directory
 
-    # 1. 测试基线 DataLoader
-    print("--- 正在构建 Baseline DataLoaders ---")
+    # 1. Test the baseline DataLoader
+    print("--- Building Baseline DataLoaders ---")
     baseline_loaders = get_baseline_dataloaders(CSV_FILE, DATA_DIR, batch_size=16, num_workers=0)
 
-    # 获取一个 Batch 试试
+    # Grab one batch to check
     batch = next(iter(baseline_loaders['train']))
-    print(f"Batch Image Shape: {batch['image'].shape}")  # 预期: [16, 3, 224, 224]
-    print(f"Batch Label Shape: {batch['label'].shape}")  # 预期: [16]
+    print(f"Batch Image Shape: {batch['image'].shape}")  # expected: [16, 3, 224, 224]
+    print(f"Batch Label Shape: {batch['label'].shape}")  # expected: [16]
     print(f"Batch Instar Sample: {batch['instar'][:5]}")
 
-    print("\n--- 正在构建 Cross-Instar DataLoaders ---")
+    print("\n--- Building Cross-Instar DataLoaders ---")
     cross_loaders = get_cross_instar_dataloaders(CSV_FILE, DATA_DIR, batch_size=16, num_workers=0)
